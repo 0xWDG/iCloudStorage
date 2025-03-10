@@ -28,7 +28,20 @@ public struct iCloudStorage<T>: DynamicProperty {
     /// The default value to use if the value is not set yet.
     let defaultValue: T
 
-    @State private var value: T
+    final private class Storage: ObservableObject {
+        var value: T {
+            willSet {
+                print("Willset")
+                objectWillChange.send()
+            }
+        }
+
+        init(_ value: T) {
+            self.value = value
+        }
+    }
+
+    @ObservedObject private var value: Storage
 
     /// Creates an `iCloudStorage` property.
     ///
@@ -37,18 +50,20 @@ public struct iCloudStorage<T>: DynamicProperty {
     public init(wrappedValue: T, _ key: String) {
         self.key = key
         self.defaultValue = wrappedValue
-        self.value = NSUbiquitousKeyValueStore.default.object(forKey: key) as? T ?? defaultValue
+        self.value = Storage(
+            NSUbiquitousKeyValueStore.default.object(forKey: key) as? T ?? defaultValue
+        )
     }
 
     /// The value of the key in iCloud.
     public var wrappedValue: T {
         get {
-            return value
+            return value.value
         }
 
         nonmutating set {
             NSUbiquitousKeyValueStore.default.set(newValue, forKey: key)
-            value = newValue
+            value.value = newValue
         }
     }
 
@@ -57,6 +72,7 @@ public struct iCloudStorage<T>: DynamicProperty {
         Binding {
             return self.wrappedValue
         } set: { newValue in
+            value.value = newValue
             self.wrappedValue = newValue
         }
     }
