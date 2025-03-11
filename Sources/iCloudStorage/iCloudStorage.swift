@@ -31,7 +31,7 @@ public struct iCloudStorage<T>: DynamicProperty {
 
     var cancellables = Set<AnyCancellable>()
 
-    final private class Storage: ObservableObject {
+    private final class Storage: ObservableObject {
         var value: T {
             willSet {
                 objectWillChange.send()
