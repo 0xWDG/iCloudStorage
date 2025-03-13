@@ -29,21 +29,11 @@ public struct iCloudStorage<T>: DynamicProperty {
     /// The default value to use if the value is not set yet.
     let defaultValue: T
 
+    /// The cancellables to store.
     var cancellables = Set<AnyCancellable>()
 
-    private final class Storage: ObservableObject {
-        var value: T {
-            willSet {
-                objectWillChange.send()
-            }
-        }
-
-        init(_ value: T) {
-            self.value = value
-        }
-    }
-
-    @ObservedObject private var value: Storage
+    /// The observed storage
+    @ObservedObject private var store: Storage
 
     /// Creates an `iCloudStorage` property.
     ///
@@ -52,10 +42,11 @@ public struct iCloudStorage<T>: DynamicProperty {
     public init(wrappedValue: T, _ key: String) {
         self.key = key
         self.defaultValue = wrappedValue
-        self.value = Storage(
+        self.store = Storage(
             NSUbiquitousKeyValueStore.default.object(forKey: key) as? T ?? defaultValue
         )
 
+        // Set-up notification for changed key.
         NotificationCenter.default.publisher(
             for: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: NSUbiquitousKeyValueStore.default
@@ -64,8 +55,7 @@ public struct iCloudStorage<T>: DynamicProperty {
         .sink { [self] notification in
             if let keys = notification.userInfo?[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String],
                keys.contains(key) {
-                self.value.value = NSUbiquitousKeyValueStore.default.object(forKey: key) as? T ?? defaultValue
-                self.value.objectWillChange.send()
+                self.store.value = NSUbiquitousKeyValueStore.default.object(forKey: key) as? T ?? defaultValue
             }
         }
         .store(in: &cancellables)
@@ -74,22 +64,52 @@ public struct iCloudStorage<T>: DynamicProperty {
     /// The value of the key in iCloud.
     public var wrappedValue: T {
         get {
-            return value.value
+            return store.value
         }
 
         nonmutating set {
             NSUbiquitousKeyValueStore.default.set(newValue, forKey: key)
-            value.value = newValue
+            store.value = newValue
         }
     }
 
     /// A binding to the value of the key in iCloud.
     public var projectedValue: Binding<T> {
-        Binding {
-            return self.wrappedValue
-        } set: { newValue in
-            value.value = newValue
-            self.wrappedValue = newValue
+        $store.value
+    }
+
+    // MARK: - Storage
+    private final class Storage: ObservableObject {
+        var parentWillChange: ObservableObjectPublisher?
+
+        var value: T {
+            willSet {
+                objectWillChange.send()
+                parentWillChange?.send()
+            }
+        }
+
+        init(_ value: T) {
+            self.value = value
+        }
+    }
+
+    // MARK: - Get parent
+    /// Get the parent, to send a willChange event to there.
+    public static subscript<OuterSelf: ObservableObject>(
+        _enclosingInstance instance: OuterSelf,
+        wrapped wrappedKeyPath: ReferenceWritableKeyPath<OuterSelf, T>,
+        storage storageKeyPath: ReferenceWritableKeyPath<OuterSelf, Self>
+    ) -> T {
+        get {
+            instance[keyPath: storageKeyPath].store.parentWillChange = (
+                instance.objectWillChange as? ObservableObjectPublisher
+            )
+
+            return instance[keyPath: storageKeyPath].wrappedValue
+        }
+        set {
+            instance[keyPath: storageKeyPath].wrappedValue = newValue
         }
     }
 }
